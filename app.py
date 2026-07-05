@@ -155,7 +155,7 @@ def chunk_text_with_cross_page_overlap(reader, chunk_size=400, overlap=80, page_
     return all_chunks
 
 def retrieve(query, k=3, max_distance=MAX_DISTANCE):
-    """Robust retrieval with index validation and L2 distance filtering"""
+    """Robust retrieval with index validation and adaptive threshold fallback"""
     if st.session_state.index is None or not st.session_state.chunks:
         return []
         
@@ -164,13 +164,17 @@ def retrieve(query, k=3, max_distance=MAX_DISTANCE):
     
     results = []
     for dist, i in zip(distances[0], indices[0]):
-        # Validate against index -1 and out of bounds
         if i == -1 or i >= len(st.session_state.chunks):
             continue
-        # L2 Distance: Filter out if it exceeds MAX_DISTANCE
-        if dist > max_distance:
-            continue
-        results.append(st.session_state.chunks[i])
+        # Om avståndet är bra, lägg till i ordinarie resultat
+        if dist <= max_distance:
+            results.append(st.session_state.chunks[i])
+            
+    # FALLBACK: Om inget matchade under tröskelvärdet, men vi har en giltig förstaplats
+    if not results and indices[0][0] != -1 and indices[0][0] < len(st.session_state.chunks):
+        # Ta den absolut bästa träffen oavsett distans, så länge den inte är helt galen (t.ex. > 1.8)
+        if distances[0][0] < 1.8:
+            results.append(st.session_state.chunks[indices[0][0]])
         
     return results
 
