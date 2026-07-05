@@ -21,7 +21,7 @@ INDEX_PATH = "faiss_index.bin"
 CHUNKS_PATH = "chunks.pkl"
 
 # L2 Distance Threshold: Lower = more similar
-MAX_DISTANCE = 1.2 
+MAX_DISTANCE = 1.45
 
 BUSINESS_SYSTEM_PROMPT = """You are a Senior Business Analyst and AI Agent.
 Your job is to support Product Managers with highly structured, fact-based insights.
