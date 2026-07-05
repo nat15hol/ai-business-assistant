@@ -194,7 +194,7 @@ with tab_docs:
         with st.spinner("Analyzing text and building a traceable knowledge base..."):
             try:
                 reader = PdfReader(pdf_file)
-                chunks = chunk_text_with_cross_page_overlap(reader)
+                chunks = chunk_text_with_cross_page_overlap(reader, chunk_size=80, overlap=20)
                 
                 if not chunks:
                     st.error("Unable to extract text. The PDF file may be empty or image-based.")
