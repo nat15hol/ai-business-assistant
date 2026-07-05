@@ -1,12 +1,18 @@
-# Virtual environment
-venv/
-
-# Environment variables
-.env
-
 # Python cache
 __pycache__/
 *.pyc
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables & Streamlit secrets
+.env
+.streamlit/secrets.toml
+
+# FAISS Database & Pickled chunks (Generated locally)
+faiss_index.bin
+chunks.pkl
 
 # OS files
 .DS_Store

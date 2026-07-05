@@ -11,16 +11,16 @@ import json
 from sentence_transformers import SentenceTransformer
 
 # ===========================================================================
-# 1. KONFIGURATION OCH GLOBAL STATE
+# 1. CONFIGURATION AND GLOBAL STATE
 # ===========================================================================
 st.set_page_config(page_title="Enterprise AI Business Assistant", page_icon="💼", layout="wide")
-st.title("💼 Enterprise AI Business Assistant")
-st.caption("Production-Grade RAG & Multi-Step Sales Analytics Agent")
+st.title("Enterprise AI Business Assistant")
+st.caption("RAG & Multi-Step Sales Analytics Agent")
 
 INDEX_PATH = "faiss_index.bin"
 CHUNKS_PATH = "chunks.pkl"
 
-# L2-avstånd tröskelvärde: Lägre = mer likt.
+# L2 Distance Threshold: Lower = more similar
 MAX_DISTANCE = 1.2 
 
 BUSINESS_SYSTEM_PROMPT = """You are a Senior Business Analyst and AI Agent.
@@ -44,7 +44,7 @@ If the information cannot be found in the context, explicitly state that."""
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Defensiv initialisering av Session State
+# Defensive Session State Initialization
 if "index" not in st.session_state:
     st.session_state.index = None
 if "chunks" not in st.session_state:
@@ -57,12 +57,12 @@ if "has_valid_chart" not in st.session_state:
     st.session_state.has_valid_chart = False
 
 # ===========================================================================
-# 2. CORE ENGINE & UTILITIES (Robust felhantering)
+# 2. CORE ENGINE & UTILITIES
 # ===========================================================================
 def ask_llm(prompt, temperature=0.2):
-    """Robust API-klient med dubbel felhantering och explicit nyckelkoll"""
+    """Robust API client with comprehensive error handling"""
     if not GROQ_API_KEY:
-        st.error("🔑 GROQ_API_KEY saknas. Vänligen konfigurera Streamlit Secrets eller miljövariabler.")
+        st.error("GROQ_API_KEY is missing. Please configure Streamlit Secrets or environment variables.")
         return "Error: Missing API Key"
 
     try:
@@ -84,15 +84,15 @@ def ask_llm(prompt, temperature=0.2):
         )
         
         if response.status_code != 200:
-            return f"⚠️ API Felkod {response.status_code}: {response.text}"
+            return f"API Error {response.status_code}: {response.text}"
             
         data = response.json()
         return data["choices"][0]["message"]["content"]
         
     except requests.exceptions.RequestException as e:
-        return f"⚠️ Nätverksfel mot LLM-API: {str(e)}"
+        return f"Network error connecting to LLM API: {str(e)}"
     except (KeyError, ValueError) as e:
-        return f"⚠️ Oväntat fel vid parsning av API-svar: {str(e)}"
+        return f"Unexpected error parsing API response: {str(e)}"
 
 @st.cache_resource
 def load_embedder():
@@ -101,7 +101,7 @@ def load_embedder():
 embedder = load_embedder()
 
 def load_index_if_exists():
-    """Robust laddning av persistens utan kraschrisk"""
+    """Robust loading of persistent index without crash risks"""
     if os.path.exists(INDEX_PATH) and os.path.exists(CHUNKS_PATH):
         try:
             index = faiss.read_index(INDEX_PATH)
@@ -109,25 +109,25 @@ def load_index_if_exists():
                 chunks = pickle.load(f)
             return index, chunks
         except Exception as e:
-            st.warning(f"Kunde inte läsa tidigare sparad databas ({str(e)}). Initierar ny.")
+            st.warning(f"Could not read previously saved database ({str(e)}). Initializing new index.")
             return None, None
     return None, None
 
-# Automatiskt återställande av state vid appstart
+# Automatic state restoration on app launch
 if st.session_state.index is None:
     loaded_index, loaded_chunks = load_index_if_exists()
     if loaded_index is not None:
         st.session_state.index = loaded_index
         st.session_state.chunks = loaded_chunks
-        st.info("💾 Befintlig kunskapsbas lästes in från disk.")
+        st.info("Existing knowledge base loaded successfully from disk.")
 
 # ===========================================================================
-# 3. AVANCERAD RAG-LOGIK (Sidöverskridande overlap & Rättad tröskel)
+# 3. ADVANCED RAG LOGIC (Cross-page overlap & Distance threshold)
 # ===========================================================================
 def chunk_text_with_cross_page_overlap(reader, chunk_size=400, overlap=80, page_overlap_words=40):
     """
-    Kombinerad chunking-algoritm: Löser cross-page overlap med 
-    carry_over-mekanism och injicerar exakt sidmetadata för spårbarhet.
+    Combined chunking algorithm: Resolves cross-page overlap using a 
+    carry-over mechanism and injects exact page metadata for traceability.
     """
     all_chunks = []
     carry_over = [] 
@@ -140,7 +140,7 @@ def chunk_text_with_cross_page_overlap(reader, chunk_size=400, overlap=80, page_
             
         combined_words = carry_over + words
         
-        # Intern chunking för den sammanslagna ordlistan
+        # Internal chunking for the combined word list
         step = max(chunk_size - overlap, 1)
         for i in range(0, len(combined_words), step):
             chunk_content = " ".join(combined_words[i : i + chunk_size])
@@ -149,13 +149,13 @@ def chunk_text_with_cross_page_overlap(reader, chunk_size=400, overlap=80, page_
             if i + chunk_size >= len(combined_words):
                 break
                 
-        # Spara slutet av sidan som carry-over till nästa
+        # Save the end of the page as carry-over for the next page
         carry_over = words[-page_overlap_words:] if len(words) > page_overlap_words else words
                 
     return all_chunks
 
 def retrieve(query, k=3, max_distance=MAX_DISTANCE):
-    """Robust retrieval med indexskydd och RÄTTAD distans-threshold"""
+    """Robust retrieval with index validation and L2 distance filtering"""
     if st.session_state.index is None or not st.session_state.chunks:
         return []
         
@@ -164,10 +164,10 @@ def retrieve(query, k=3, max_distance=MAX_DISTANCE):
     
     results = []
     for dist, i in zip(distances[0], indices[0]):
-        # Validera mot index -1 och out of bounds
+        # Validate against index -1 and out of bounds
         if i == -1 or i >= len(st.session_state.chunks):
             continue
-        # L2-avstånd: Ju mindre desto bättre. Filtrera bort om det överstiger MAX_DISTANCE
+        # L2 Distance: Filter out if it exceeds MAX_DISTANCE
         if dist > max_distance:
             continue
         results.append(st.session_state.chunks[i])
@@ -175,7 +175,7 @@ def retrieve(query, k=3, max_distance=MAX_DISTANCE):
     return results
 
 # ===========================================================================
-# 4. PRODUKTDESIGN / GRÄNSSNITT (Flikbaserad struktur)
+# 4. USER INTERFACE (Tabbed Structure)
 # ===========================================================================
 tab_docs, tab_sales, tab_reports = st.tabs([
     "📄 Document Knowledge Base", 
@@ -184,20 +184,20 @@ tab_docs, tab_sales, tab_reports = st.tabs([
 ])
 
 # ---------------------------------------------------------------------------
-# FLIK 1: KUNSKAPSBAS (RAG + Q&A)
+# TAB 1: KNOWLEDGE BASE (RAG + Q&A)
 # ---------------------------------------------------------------------------
 with tab_docs:
-    st.header("📄 Hantera Affärsdokument")
-    pdf_file = st.file_uploader("Ladda upp strategidokument eller kvartalsrapport (PDF)", type=["pdf"])
+    st.header("📄 Manage Business Documents")
+    pdf_file = st.file_uploader("Upload strategy document or quarterly report (PDF)", type=["pdf"])
 
     if pdf_file:
-        with st.spinner("Analyserar text och bygger spårbar kunskapsbas..."):
+        with st.spinner("Analyzing text and building a traceable knowledge base..."):
             try:
                 reader = PdfReader(pdf_file)
                 chunks = chunk_text_with_cross_page_overlap(reader)
                 
                 if not chunks:
-                    st.error("Det gick inte att extrahera text. PDF-filen kan vara tom eller bildbaserad.")
+                    st.error("Unable to extract text. The PDF file may be empty or image-based.")
                 else:
                     embeddings = np.array(embedder.encode(chunks)).astype("float32")
                     index = faiss.IndexFlatL2(embeddings.shape[1])
@@ -206,25 +206,25 @@ with tab_docs:
                     st.session_state.index = index
                     st.session_state.chunks = chunks
                     
-                    # Persistens
+                    # Persistence
                     faiss.write_index(index, INDEX_PATH)
                     with open(CHUNKS_PATH, "wb") as f:
                         pickle.dump(chunks, f)
                         
-                    st.success(f"✅ Dokumentet har indexerats! {len(chunks)} segment sparas robust.")
+                    st.success(f"Document successfully indexed! {len(chunks)} segments saved securely.")
             except Exception as e:
-                st.error(f"Ett fel uppstod vid bearbetning av PDF-filen: {str(e)}")
+                st.error(f"An error occurred while processing the PDF file: {str(e)}")
 
-    st.subheader("💬 Fråga dokumentet")
-    question = st.text_input("Ställ en strategisk fråga till din databas:")
+    st.subheader("💬 Query the Document")
+    question = st.text_input("Ask a strategic question to your knowledge base:")
 
     if question:
         if st.session_state.index is None:
-            st.warning("Vänligen ladda upp och indexera ett dokument först.")
+            st.warning("Please upload and index a document first.")
         else:
             relevant_chunks = retrieve(question)
             if not relevant_chunks:
-                st.info("Ingen tillräckligt relevant kontext hittades för att besvara frågan säkert.")
+                st.info("No sufficiently relevant context was found to answer the question accurately.")
             else:
                 context = "\n\n".join(relevant_chunks)
                 prompt = f"""Use ONLY the following context to answer the question. 
@@ -236,25 +236,25 @@ CONTEXT:
 QUESTION:
 {question}"""
                 
-                with st.spinner("Söker och analyserar..."):
+                with st.spinner("Searching and analyzing..."):
                     answer = ask_llm(prompt, temperature=0.2)
-                    st.markdown("### Svar från Agenten")
+                    st.markdown("### Agent Response")
                     st.write(answer)
 
 # ---------------------------------------------------------------------------
-# FLIK 2: SÄLJDATA (Rådata, Plotly & Flerstegsagent)
+# TAB 2: SALES DATA (Raw Data, Plotly & Multi-Step Agent)
 # ---------------------------------------------------------------------------
 with tab_sales:
-    st.header("📊 Marknads- & Försäljningsdata")
-    csv_file = st.file_uploader("Ladda upp säljdata (CSV)", type=["csv"])
+    st.header("📊 Market & Sales Data")
+    csv_file = st.file_uploader("Upload sales data (CSV)", type=["csv"])
 
     if csv_file:
         try:
             df = pd.read_csv(csv_file)
-            st.subheader("Förhandsvisning (Topp 10 rader)")
-            st.dataframe(df.head(10)) # df.head(10) håller UI städat
+            st.subheader("Data Preview (Top 10 Rows)")
+            st.dataframe(df.head(10))
             
-            # Kolumnvalidering med visuell feedback
+            # Column validation with visual feedback
             required_cols = {"Month", "Revenue"}
             if required_cols.issubset(df.columns):
                 st.session_state.has_valid_chart = True
@@ -263,70 +263,70 @@ with tab_sales:
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.session_state.has_valid_chart = False
-                st.warning(f"⚠️ Diagram kan inte ritas. CSV saknar kolumner: {required_cols - set(df.columns)}")
+                st.warning(f"Unable to render chart. CSV is missing columns: {required_cols - set(df.columns)}")
                 
-            # Beräkna och spara statistisk sammanfattning EN gång
+            # Compute and cache statistical summary once
             summary_stats = df.describe(include='all').to_string()
             missing_data = df.isnull().sum().to_string()
             
             st.session_state.raw_csv_string = df.to_string()
             st.session_state.last_df_summary = f"""
-STATISTISK SAMMANFATTNING:
+STATISTICAL SUMMARY:
 {summary_stats}
 
-SAKNADE VÄRDEN:
+MISSING VALUES:
 {missing_data}
 """
-            # Snygg uppdelning av triggers
+            # Action triggers
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("📈 Kör Standard Dataanalys"):
-                    prompt = f"Utför en affärsanalys av följande säljdata och trender.\n\n{st.session_state.last_df_summary}"
-                    with st.spinner("Genererar dataanalys..."):
+                if st.button("📈 Run Standard Data Analysis"):
+                    prompt = f"Perform a business analysis of the following sales data and trends.\n\n{st.session_state.last_df_summary}"
+                    with st.spinner("Generating data analysis..."):
                         st.write(ask_llm(prompt, temperature=0.15))
                         
             with col2:
-                if st.button("🤖 Kör Agentic Flerstegsanalys (Multi-Step)"):
-                    with st.spinner("Agenten exekverar flerstegsresonemang..."):
+                if st.button("🤖 Run Multi-Step Agentic Analysis"):
+                    with st.spinner("Agent executing multi-step reasoning..."):
                         
-                        # Steg 1: Datainsamling och KPI-extraktion (Hård temperatur 0.0 för precision)
+                        # Step 1: Data Collection & KPI Extraction (Deterministic temp 0.0)
                         step1_prompt = f"""Extract all critical numbers, total revenue, best performing products, 
 and any visible data anomalies as a clean, raw fact list from this data:\n\n{st.session_state.raw_csv_string}"""
                         extracted_metrics = ask_llm(step1_prompt, temperature=0.0)
                         
-                        # Steg 2: Strategiskt resonemang (Högre temperatur 0.4 för affärskreativitet)
+                        # Step 2: Strategic Reasoning (Creative/Analytical temp 0.4)
                         step2_prompt = f"""Review these extracted business metrics and construct a final 
 strategic execution plan with action points for the executive team:\n\n{extracted_metrics}"""
                         final_strategy = ask_llm(step2_prompt, temperature=0.4)
                         
-                        # Visuell presentation av stegen
-                        st.subheader("📌 Steg 1: Extraherade Nyckeltal (Precision 0.0)")
+                        # Visual presentation of agent steps
+                        st.subheader("📌 Step 1: Extracted Metrics (Precision Temp: 0.0)")
                         st.info(extracted_metrics)
-                        st.subheader("🎯 Steg 2: Strategiska Rekommendationer (Resonemang 0.4)")
+                        st.subheader("🎯 Step 2: Strategic Recommendations (Reasoning Temp: 0.4)")
                         st.write(final_strategy)
                         
         except Exception as e:
-            st.error(f"Ett fel uppstod vid inläsning eller parsning av CSV-filen: {str(e)}")
+            st.error(f"An error occurred while reading or parsing the CSV file: {str(e)}")
 
 # ---------------------------------------------------------------------------
-# FLIK 3: AUTOMATION (Kombinerad Veckorapport utan hallucinationer)
+# TAB 3: AUTOMATION (Unified Weekly Report)
 # ---------------------------------------------------------------------------
 with tab_reports:
     st.header("🗓️ Executive Automation")
-    st.caption("Sammanfogar automatiskt dokumentinsikter och säljdata till en strategisk rapport.")
+    st.caption("Automatically combines document insights and sales data into a unified strategic report.")
 
-    if st.button("📅 Generera Slutgiltig Veckorapport"):
+    if st.button("📅 Generate Final Weekly Report"):
         has_doc = st.session_state.chunks is not None
         has_csv = st.session_state.last_df_summary is not None
         
         if not has_doc and not has_csv:
-            st.warning("Det krävs att du laddar upp antingen ett dokument eller en CSV-fil för att bygga en rapport.")
+            st.warning("Please upload either a document or a CSV file to generate a report.")
         else:
-            with st.spinner("Väver samman datakällor till en samlad executive summary..."):
-                # Hämta de översta centrala chunkarna som kontext om dokument finns
-                doc_context = "\n\n".join(st.session_state.chunks[:6]) if has_doc else "Inget dokument tillgängligt."
-                csv_context = f"{st.session_state.raw_csv_string}\n{st.session_state.last_df_summary}" if has_csv else "Ingen säljdata tillgänglig."
+            with st.spinner("Synthesizing data sources into an executive summary..."):
+                # Fetch top chunks as context if document exists
+                doc_context = "\n\n".join(st.session_state.chunks[:6]) if has_doc else "No document available."
+                csv_context = f"{st.session_state.raw_csv_string}\n{st.session_state.last_df_summary}" if has_csv else "No sales data available."
                 
                 report_prompt = f"""Create a comprehensive Weekly Executive Business Report by weaving together 
 the document insights and the market sales data provided below. 
@@ -342,5 +342,5 @@ ACTUAL SALES & TREND DATA CONTEXT:
 Ensure that conclusions drawn in the report directly bridge the gap between the document rules and the actual numbers."""
 
                 report = ask_llm(report_prompt, temperature=0.3)
-                st.subheader("📋 Slutgiltig Veckorapport (Kombinerad)")
+                st.subheader("📋 Final Combined Executive Report")
                 st.write(report)
