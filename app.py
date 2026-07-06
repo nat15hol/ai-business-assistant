@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-# plotly.express är borttagen
+import plotly.express as px
 from pypdf import PdfReader
 import numpy as np
 import faiss
@@ -19,9 +19,6 @@ st.caption("RAG & Multi-Step Sales Analytics Agent")
 
 INDEX_PATH = "faiss_index.bin"
 CHUNKS_PATH = "chunks.pkl"
-
-# LÄGG TILL DIN POWER BI EMBED URL HÄR
-POWER_BI_EMBED_URL = "https://app.powerbi.com/view?r=DIN_UNIKA_EMBED_STRÄNG_HÄR"
 
 # L2 Distance Threshold: Lower = more similar
 MAX_DISTANCE = 1.6
@@ -249,24 +246,11 @@ QUESTION:
                     st.write(answer)
 
 # ---------------------------------------------------------------------------
-# TAB 2: SALES DATA (Raw Data, Power BI Embed & Multi-Step Agent)
+# TAB 2: SALES DATA (Raw Data, Plotly & Multi-Step Agent)
 # ---------------------------------------------------------------------------
 with tab_sales:
     st.header("📊 Market & Sales Data")
-    
-    # Renderar Power BI instrumentpanelen högst upp i fliken
-    st.subheader("🌐 Power BI Executive Dashboard")
-    try:
-        # Laddar in Power BI rapporten via en stabil iframe-komponent
-        st.components.v1.iframe(src=POWER_BI_EMBED_URL, height=600, scrolling=False)
-    except Exception as e:
-        st.error(f"Kunde inte ladda Power BI-dashboarden: {str(e)}")
-        
-    st.markdown("---")
-    
-    # Behåller filuppladdaren för att agenten ska kunna läsa och analysera rådata
-    st.subheader("📂 Upload Context Data for AI Agent")
-    csv_file = st.file_uploader("Upload sales data for text analysis (CSV)", type=["csv"])
+    csv_file = st.file_uploader("Upload sales data (CSV)", type=["csv"])
 
     if csv_file:
         try:
@@ -274,7 +258,18 @@ with tab_sales:
             st.subheader("Data Preview (Top 10 Rows)")
             st.dataframe(df.head(10))
             
-            # Beräknar statistisk sammanfattning för agenten
+            # Column validation with visual feedback
+            required_cols = {"Month", "Revenue"}
+            if required_cols.issubset(df.columns):
+                st.session_state.has_valid_chart = True
+                color_col = "Product" if "Product" in df.columns else None
+                fig = px.bar(df, x="Month", y="Revenue", color=color_col, title="Revenue Performance Dashboard")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.session_state.has_valid_chart = False
+                st.warning(f"Unable to render chart. CSV is missing columns: {required_cols - set(df.columns)}")
+                
+            # Compute and cache statistical summary once
             summary_stats = df.describe(include='all').to_string()
             missing_data = df.isnull().sum().to_string()
             
