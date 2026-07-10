@@ -1,19 +1,25 @@
-# Python cache
-__pycache__/
-*.pyc
-
-# Virtual environment
-venv/
-.venv/
-
-# Environment variables & Streamlit secrets
+# Lokala databaser och hemligheter
+faiss_index.bin
+chunks.pkl
 .env
 .streamlit/secrets.toml
 
-# FAISS Database & Pickled chunks (Generated locally)
-faiss_index.bin
-chunks.pkl
+# Python-hygien
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
 
-# OS files
+# Virtuella miljöer
+.venv/
+venv/
+ENV/
+env/
+
+# OS-specifika filer
 .DS_Store
 Thumbs.db
+
+# Redigerarinställningar
+.vscode/
+.idea/
