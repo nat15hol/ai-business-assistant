@@ -258,29 +258,100 @@ with tab_sales:
             st.subheader("Data Preview (Top 10 Rows)")
             st.dataframe(df.head(10))
             
-            # Column validation with visual feedback
-            required_cols = {"Month", "Revenue"}
-            if required_cols.issubset(df.columns):
+            # Flexible column detection: accept common synonyms instead of
+            # requiring the exact literal names "Month" / "Revenue" / "Product".
+            def find_col(candidates):
+                for c in candidates:
+                    if c in df.columns:
+                        return c
+                # case-insensitive fallback
+                lower_map = {col.lower(): col for col in df.columns}
+                for c in candidates:
+                    if c.lower() in lower_map:
+                        return lower_map[c.lower()]
+                return None
+
+            x_col = find_col(["Month", "quarter", "Quarter", "Date", "period"])
+            y_col = find_col(["Revenue", "revenue_eur", "revenue", "Sales"])
+            color_col = find_col(["Product", "product", "segment", "Segment"])
+
+            if x_col and y_col:
                 st.session_state.has_valid_chart = True
-                color_col = "Product" if "Product" in df.columns else None
-                fig = px.bar(df, x="Month", y="Revenue", color=color_col, title="Revenue Performance Dashboard")
+                fig = px.bar(df, x=x_col, y=y_col, color=color_col, title="Revenue Performance Dashboard")
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.session_state.has_valid_chart = False
-                st.warning(f"Unable to render chart. CSV is missing columns: {required_cols - set(df.columns)}")
-                
-            # Compute and cache statistical summary once
-            summary_stats = df.describe(include='all').to_string()
-            missing_data = df.isnull().sum().to_string()
-            
-            st.session_state.raw_csv_string = df.to_string()
-            st.session_state.last_df_summary = f"""
-STATISTICAL SUMMARY:
-{summary_stats}
+                missing = [name for name, col in [("a time/period column (e.g. Month or quarter)", x_col),
+                                                   ("a revenue column (e.g. Revenue or revenue_eur)", y_col)] if col is None]
+                st.warning(f"Unable to render chart. CSV is missing: {', '.join(missing)}")
 
-MISSING VALUES:
-{missing_data}
-"""
+            # ------------------------------------------------------------------
+            # Build a COMPACT KPI summary instead of sending the raw CSV to the
+            # LLM. Sending df.to_string() for a large file blows past Groq's
+            # free-tier TPM limit (and wastes tokens/money on any provider).
+            # ------------------------------------------------------------------
+            def build_kpi_summary(df):
+                lines = []
+                lines.append(f"Total rows: {len(df)}")
+
+                revenue_col = find_col(["revenue_eur", "Revenue", "revenue", "Sales"])
+                margin_col = find_col(["gross_margin_eur", "Margin", "margin"])
+                units_col = find_col(["units_sold", "Units", "units", "quantity"])
+                quarter_col = find_col(["quarter", "Quarter", "Month", "period"])
+                product_col = find_col(["product", "Product"])
+                segment_col = find_col(["segment", "Segment"])
+                country_col = find_col(["country", "Country"])
+
+                if revenue_col:
+                    lines.append(f"Total revenue: {df[revenue_col].sum():,.2f}")
+                if margin_col:
+                    lines.append(f"Total gross margin: {df[margin_col].sum():,.2f}")
+                if units_col:
+                    lines.append(f"Total units sold: {df[units_col].sum():,.0f}")
+
+                def agg_block(group_col, label):
+                    if not group_col:
+                        return
+                    agg_dict = {}
+                    if revenue_col:
+                        agg_dict[revenue_col] = "sum"
+                    if margin_col:
+                        agg_dict[margin_col] = "sum"
+                    if units_col:
+                        agg_dict[units_col] = "sum"
+                    if not agg_dict:
+                        return
+                    grouped = df.groupby(group_col).agg(agg_dict).round(2)
+                    lines.append(f"\n{label} breakdown:")
+                    lines.append(grouped.to_string())
+
+                agg_block(quarter_col, "Revenue/margin/units by quarter")
+                agg_block(product_col, "Revenue/margin/units by product")
+                agg_block(segment_col, "Revenue/margin/units by segment")
+                agg_block(country_col, "Revenue/margin/units by country (top 10)" if country_col and df[country_col].nunique() > 10 else "Revenue/margin/units by country")
+
+                # Simple anomaly flag: numeric outliers beyond 3 std devs
+                numeric_cols = df.select_dtypes(include="number").columns
+                anomalies = []
+                for col in numeric_cols:
+                    std = df[col].std()
+                    mean = df[col].mean()
+                    if std and std > 0:
+                        outliers = df[(df[col] - mean).abs() > 3 * std]
+                        if len(outliers) > 0:
+                            anomalies.append(f"{col}: {len(outliers)} outlier row(s) beyond 3 std dev")
+                if anomalies:
+                    lines.append("\nPotential anomalies:")
+                    lines.extend(anomalies)
+
+                return "\n".join(lines)
+
+            kpi_summary = build_kpi_summary(df)
+
+            # Keep the full dataframe only for on-screen preview/debugging —
+            # NEVER pass st.session_state.raw_csv_string to an LLM prompt.
+            st.session_state.raw_csv_string = df.to_string()
+            st.session_state.last_df_summary = kpi_summary
             # Action triggers
             col1, col2 = st.columns(2)
             
@@ -295,8 +366,10 @@ MISSING VALUES:
                     with st.spinner("Agent executing multi-step reasoning..."):
                         
                         # Step 1: Data Collection & KPI Extraction (Deterministic temp 0.0)
+                        # NOTE: we pass the compact pandas-computed KPI summary, not the raw CSV,
+                        # to stay well under the LLM provider's tokens-per-minute limit.
                         step1_prompt = f"""Extract all critical numbers, total revenue, best performing products, 
-and any visible data anomalies as a clean, raw fact list from this data:\n\n{st.session_state.raw_csv_string}"""
+and any visible data anomalies as a clean, raw fact list from this data:\n\n{st.session_state.last_df_summary}"""
                         extracted_metrics = ask_llm(step1_prompt, temperature=0.0)
                         
                         # Step 2: Strategic Reasoning (Creative/Analytical temp 0.4)
@@ -330,7 +403,8 @@ with tab_reports:
             with st.spinner("Synthesizing data sources into an executive summary..."):
                 # Fetch top chunks as context if document exists
                 doc_context = "\n\n".join(st.session_state.chunks[:6]) if has_doc else "No document available."
-                csv_context = f"{st.session_state.raw_csv_string}\n{st.session_state.last_df_summary}" if has_csv else "No sales data available."
+                # Compact KPI summary only — never the raw CSV — to stay under the LLM's token limit.
+                csv_context = st.session_state.last_df_summary if has_csv else "No sales data available."
                 
                 report_prompt = f"""Create a comprehensive Weekly Executive Business Report by weaving together 
 the document insights and the market sales data provided below. 
