@@ -73,7 +73,7 @@ def ask_llm(prompt, temperature=0.2):
                 "Content-Type": "application/json",
             },
             json={
-                "model": "llama-3.1-8b-instant",
+                "model": "openai/gpt-oss-20b",
                 "messages": [
                     {"role": "system", "content": BUSINESS_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
