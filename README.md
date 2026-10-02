@@ -214,6 +214,16 @@ The system prompt (`BUSINESS_SYSTEM_PROMPT`) defines the output structure and ca
 - [ ] Per-session indexes instead of a shared on-disk index
 - [ ] Unit tests for chunking, retrieval and KPI summary logic
 
+## Author
+
+Henrik Oldehed
+
+Data Engineer | Backend and Software Developer — building full-stack systems end-to-end
+
+GitHub: https://github.com/nat15hol
+
+LinkedIn: https://www.linkedin.com/in/henrikoldehed/
+
 ## License
 
 [MIT](LICENSE)
