@@ -1,4 +1,4 @@
-# 💼 Enterprise AI Business Assistant
+# Enterprise AI Business Assistant
 
 **A Streamlit app that gives Product Managers fact-grounded answers from strategy documents (RAG) and turns raw sales CSVs into structured KPI analysis, using a multi-step LLM agent.**
 
