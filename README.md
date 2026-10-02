@@ -8,7 +8,7 @@
 ![Groq](https://img.shields.io/badge/LLM-Groq-F55036)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-🔗 **Live demo:** https://ai-business-assistant-rag.streamlit.app/
+**Live demo:** https://ai-business-assistant-rag.streamlit.app/
 
 <!-- Add a screenshot or GIF here, e.g.: -->
 <!-- ![Demo](docs/demo.gif) -->
