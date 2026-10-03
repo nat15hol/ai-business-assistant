@@ -169,27 +169,27 @@ def chunk_text_with_cross_page_overlap(reader, chunk_size=400, overlap=80, page_
     return all_chunks
 
 def retrieve(query, k=3, max_distance=MAX_DISTANCE):
-    """Robust retrieval with index validation and adaptive threshold fallback"""
+    """Debug version: shows the chunks FAISS retrieves."""
     if st.session_state.index is None or not st.session_state.chunks:
         return []
-        
+
     query_vec = np.array(embedder.encode([query])).astype("float32")
     distances, indices = st.session_state.index.search(query_vec, k)
-    
+
     results = []
-    for dist, i in zip(distances[0], indices[0]):
+
+    st.markdown("### 🔍 RAG Debug — Retrieved Chunks")
+
+    for rank, (dist, i) in enumerate(zip(distances[0], indices[0]), start=1):
         if i == -1 or i >= len(st.session_state.chunks):
             continue
-        # Om avståndet är bra, lägg till i ordinarie resultat
+
+        st.write(f"**Result {rank} — distance: {dist:.4f} — chunk index: {i}**")
+        st.code(st.session_state.chunks[i])
+
         if dist <= max_distance:
             results.append(st.session_state.chunks[i])
-            
-    # FALLBACK: Om inget matchade under tröskelvärdet, men vi har en giltig förstaplats
-    if not results and indices[0][0] != -1 and indices[0][0] < len(st.session_state.chunks):
-        # Ta den absolut bästa träffen oavsett distans, så länge den inte är helt galen (t.ex. > 1.8)
-        if distances[0][0] < 1.8:
-            results.append(st.session_state.chunks[indices[0][0]])
-        
+
     return results
 
 # ===========================================================================
