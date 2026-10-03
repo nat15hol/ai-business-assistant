@@ -55,6 +55,20 @@ if "raw_csv_string" not in st.session_state:
     st.session_state.raw_csv_string = None
 if "has_valid_chart" not in st.session_state:
     st.session_state.has_valid_chart = False
+# Results are stored in session_state (not just st.write()'d right after a
+# button press) because Streamlit reruns the whole script on every
+# interaction. Without this, a result shown after clicking "Run" disappears
+# the moment you interact with anything else (a new question, another tab).
+if "doc_qa_question" not in st.session_state:
+    st.session_state.doc_qa_question = None
+if "doc_qa_answer" not in st.session_state:
+    st.session_state.doc_qa_answer = None
+if "standard_analysis_result" not in st.session_state:
+    st.session_state.standard_analysis_result = None
+if "multistep_metrics" not in st.session_state:
+    st.session_state.multistep_metrics = None
+if "multistep_strategy" not in st.session_state:
+    st.session_state.multistep_strategy = None
 
 # ===========================================================================
 # 2. CORE ENGINE & UTILITIES
@@ -222,12 +236,16 @@ with tab_docs:
     st.subheader("💬 Query the Document")
     question = st.text_input("Ask a strategic question to your knowledge base:")
 
-    if question:
+    if st.button("🔎 Ask", key="doc_qa_ask_button"):
         if st.session_state.index is None:
             st.warning("Please upload and index a document first.")
+        elif not question:
+            st.warning("Please type a question first.")
         else:
             relevant_chunks = retrieve(question)
             if not relevant_chunks:
+                st.session_state.doc_qa_question = question
+                st.session_state.doc_qa_answer = None
                 st.info("No sufficiently relevant context was found to answer the question accurately.")
             else:
                 context = "\n\n".join(relevant_chunks)
@@ -239,11 +257,19 @@ CONTEXT:
 
 QUESTION:
 {question}"""
-                
+
                 with st.spinner("Searching and analyzing..."):
-                    answer = ask_llm(prompt, temperature=0.2)
-                    st.markdown("### Agent Response")
-                    st.write(answer)
+                    # Save to session_state so the answer survives reruns
+                    # triggered by other widgets (e.g. switching tabs or
+                    # asking a new question later).
+                    st.session_state.doc_qa_question = question
+                    st.session_state.doc_qa_answer = ask_llm(prompt, temperature=0.2)
+
+    # Always render the last-saved answer, not just right after the button press.
+    if st.session_state.doc_qa_answer:
+        st.markdown("### Agent Response")
+        st.caption(f"Question: {st.session_state.doc_qa_question}")
+        st.write(st.session_state.doc_qa_answer)
 
 # ---------------------------------------------------------------------------
 # TAB 2: SALES DATA (Raw Data, Plotly & Multi-Step Agent)
@@ -352,37 +378,55 @@ with tab_sales:
             # NEVER pass st.session_state.raw_csv_string to an LLM prompt.
             st.session_state.raw_csv_string = df.to_string()
             st.session_state.last_df_summary = kpi_summary
-            # Action triggers
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("📈 Run Standard Data Analysis"):
+
+            # ------------------------------------------------------------------
+            # Multi-Step Agentic Analysis is the primary / recommended mode:
+            # separating deterministic fact-extraction (temp 0.0) from
+            # strategic reasoning (temp 0.4) is a well-established pattern
+            # for reducing hallucination, and it is also the core technical
+            # showcase of this project. Standard Analysis (a single combined
+            # call) is kept only as a quick, cheaper baseline, tucked into a
+            # collapsed expander rather than presented as an equal choice.
+            # ------------------------------------------------------------------
+            st.subheader("🤖 Multi-Step Agentic Analysis")
+            st.caption("Recommended: separates fact extraction (precise) from strategic reasoning (analytical) into two LLM calls.")
+
+            if st.button("🤖 Run Multi-Step Agentic Analysis"):
+                with st.spinner("Agent executing multi-step reasoning..."):
+                    # Step 1: Data Collection & KPI Extraction (Deterministic temp 0.0)
+                    # NOTE: we pass the compact pandas-computed KPI summary, not the raw CSV,
+                    # to stay well under the LLM provider's tokens-per-minute limit.
+                    step1_prompt = f"""Extract all critical numbers, total revenue, best performing products, 
+and any visible data anomalies as a clean, raw fact list from this data:\n\n{st.session_state.last_df_summary}"""
+                    extracted_metrics = ask_llm(step1_prompt, temperature=0.0)
+
+                    # Step 2: Strategic Reasoning (Creative/Analytical temp 0.4)
+                    step2_prompt = f"""Review these extracted business metrics and construct a final 
+strategic execution plan with action points for the executive team:\n\n{extracted_metrics}"""
+                    final_strategy = ask_llm(step2_prompt, temperature=0.4)
+
+                    # Save to session_state so the result survives reruns
+                    # (e.g. switching to another tab and back).
+                    st.session_state.multistep_metrics = extracted_metrics
+                    st.session_state.multistep_strategy = final_strategy
+
+            # Always render the last-saved Multi-Step result, not just right after the button press.
+            if st.session_state.multistep_metrics:
+                st.subheader("📌 Step 1: Extracted Metrics (Precision Temp: 0.0)")
+                st.info(st.session_state.multistep_metrics)
+                st.subheader("🎯 Step 2: Strategic Recommendations (Reasoning Temp: 0.4)")
+                st.write(st.session_state.multistep_strategy)
+
+            with st.expander("📈 Standard Data Analysis (quick baseline, single LLM call)"):
+                st.caption("Combines fact extraction and reasoning in one call — faster and cheaper, but generally less precise than Multi-Step.")
+                if st.button("Run Standard Data Analysis"):
                     prompt = f"Perform a business analysis of the following sales data and trends.\n\n{st.session_state.last_df_summary}"
                     with st.spinner("Generating data analysis..."):
-                        st.write(ask_llm(prompt, temperature=0.15))
-                        
-            with col2:
-                if st.button("🤖 Run Multi-Step Agentic Analysis"):
-                    with st.spinner("Agent executing multi-step reasoning..."):
-                        
-                        # Step 1: Data Collection & KPI Extraction (Deterministic temp 0.0)
-                        # NOTE: we pass the compact pandas-computed KPI summary, not the raw CSV,
-                        # to stay well under the LLM provider's tokens-per-minute limit.
-                        step1_prompt = f"""Extract all critical numbers, total revenue, best performing products, 
-and any visible data anomalies as a clean, raw fact list from this data:\n\n{st.session_state.last_df_summary}"""
-                        extracted_metrics = ask_llm(step1_prompt, temperature=0.0)
-                        
-                        # Step 2: Strategic Reasoning (Creative/Analytical temp 0.4)
-                        step2_prompt = f"""Review these extracted business metrics and construct a final 
-strategic execution plan with action points for the executive team:\n\n{extracted_metrics}"""
-                        final_strategy = ask_llm(step2_prompt, temperature=0.4)
-                        
-                        # Visual presentation of agent steps
-                        st.subheader("📌 Step 1: Extracted Metrics (Precision Temp: 0.0)")
-                        st.info(extracted_metrics)
-                        st.subheader("🎯 Step 2: Strategic Recommendations (Reasoning Temp: 0.4)")
-                        st.write(final_strategy)
-                        
+                        st.session_state.standard_analysis_result = ask_llm(prompt, temperature=0.15)
+
+                if st.session_state.standard_analysis_result:
+                    st.write(st.session_state.standard_analysis_result)
+
         except Exception as e:
             st.error(f"An error occurred while reading or parsing the CSV file: {str(e)}")
 
@@ -404,7 +448,20 @@ with tab_reports:
                 # Fetch top chunks as context if document exists
                 doc_context = "\n\n".join(st.session_state.chunks[:6]) if has_doc else "No document available."
                 # Compact KPI summary only — never the raw CSV — to stay under the LLM's token limit.
+                # If a Multi-Step Agentic Analysis has already been run, its extracted
+                # metrics + strategic reasoning are included too: Multi-Step is the
+                # primary analysis mode in this app, so Agent Automation builds on
+                # its output when available rather than needing a separate mode
+                # selector or a combine/recommend mechanism.
                 csv_context = st.session_state.last_df_summary if has_csv else "No sales data available."
+                if st.session_state.multistep_strategy:
+                    csv_context += f"""
+
+PREVIOUSLY EXTRACTED METRICS (Multi-Step Analysis, Step 1):
+{st.session_state.multistep_metrics}
+
+PREVIOUSLY GENERATED STRATEGIC ANALYSIS (Multi-Step Analysis, Step 2):
+{st.session_state.multistep_strategy}"""
                 
                 report_prompt = f"""Create a comprehensive Weekly Executive Business Report by weaving together 
 the document insights and the market sales data provided below. 
