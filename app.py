@@ -40,7 +40,24 @@ Always format your output using this exact structure:
 - [Point]
 
 Be extremely concise and concrete. Only use information strictly grounded in the provided context or data.
-If the information cannot be found in the context, explicitly state that."""
+If the information cannot be found in the context, explicitly state that.
+Always specify the unit when discussing financial metrics. Distinguish clearly between gross margin (€), gross margin rate (%), and gross margin per unit. Never use the term "margin" without specifying which metric you mean."""
+
+STEP1_SYSTEM_PROMPT = """You are a precise data extraction engine.
+Your task is to extract factual information from the provided sales metrics.
+
+Return only:
+- factual metrics
+- numerical values
+- trends explicitly present in the data
+- anomalies explicitly identified in the data
+- exact metric names and units
+
+Do not interpret the data.
+Do not make recommendations.
+Do not suggest actions.
+Do not invent targets, forecasts, percentages, benchmarks, or assumptions.
+If something is not provided, do not infer it."""
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
@@ -73,7 +90,7 @@ if "multistep_strategy" not in st.session_state:
 # ===========================================================================
 # 2. CORE ENGINE & UTILITIES
 # ===========================================================================
-def ask_llm(prompt, temperature=0.2):
+def ask_llm(prompt, temperature=0.2, system_prompt=BUSINESS_SYSTEM_PROMPT):
     """Robust API client with comprehensive error handling"""
     if not GROQ_API_KEY:
         st.error("GROQ_API_KEY is missing. Please configure Streamlit Secrets or environment variables.")
@@ -89,7 +106,7 @@ def ask_llm(prompt, temperature=0.2):
             json={
                 "model": "openai/gpt-oss-20b",
                 "messages": [
-                    {"role": "system", "content": BUSINESS_SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": temperature
@@ -169,7 +186,7 @@ def chunk_text_with_cross_page_overlap(reader, chunk_size=400, overlap=80, page_
     return all_chunks
 
 def retrieve(query, k=3, max_distance=MAX_DISTANCE):
-    """Debug version: shows the chunks FAISS retrieves."""
+    """Robust retrieval with index validation and adaptive threshold fallback"""
     if st.session_state.index is None or not st.session_state.chunks:
         return []
 
@@ -177,18 +194,15 @@ def retrieve(query, k=3, max_distance=MAX_DISTANCE):
     distances, indices = st.session_state.index.search(query_vec, k)
 
     results = []
-
-    st.markdown("### 🔍 RAG Debug — Retrieved Chunks")
-
-    for rank, (dist, i) in enumerate(zip(distances[0], indices[0]), start=1):
+    for dist, i in zip(distances[0], indices[0]):
         if i == -1 or i >= len(st.session_state.chunks):
             continue
-
-        st.write(f"**Result {rank} — distance: {dist:.4f} — chunk index: {i}**")
-        st.code(st.session_state.chunks[i])
-
         if dist <= max_distance:
             results.append(st.session_state.chunks[i])
+
+    if not results and indices[0][0] != -1 and indices[0][0] < len(st.session_state.chunks):
+        if distances[0][0] < 1.8:
+            results.append(st.session_state.chunks[indices[0][0]])
 
     return results
 
@@ -347,7 +361,29 @@ with tab_sales:
                         agg_dict[units_col] = "sum"
                     if not agg_dict:
                         return
-                    grouped = df.groupby(group_col).agg(agg_dict).round(2)
+                    
+                    grouped = df.groupby(group_col).agg(agg_dict)
+
+                    if revenue_col and margin_col:
+                        grouped["gross_margin_rate_pct"] = (
+                            grouped[margin_col] / grouped[revenue_col] * 100
+                        ).replace([np.inf, -np.inf], np.nan)
+
+                    grouped = grouped.round(2)
+
+                    rename_map = {}
+
+                    if revenue_col:
+                        rename_map[revenue_col] = "Revenue (€)"
+                    if margin_col:
+                        rename_map[margin_col] = "Gross margin (€)"
+                    if units_col:
+                        rename_map[units_col] = "Units sold"
+                    if "gross_margin_rate_pct" in grouped.columns:
+                        rename_map["gross_margin_rate_pct"] = "Gross margin rate (%)"
+
+                    grouped = grouped.rename(columns=rename_map)
+
                     lines.append(f"\n{label} breakdown:")
                     lines.append(grouped.to_string())
 
@@ -398,11 +434,32 @@ with tab_sales:
                     # to stay well under the LLM provider's tokens-per-minute limit.
                     step1_prompt = f"""Extract all critical numbers, total revenue, best performing products, 
 and any visible data anomalies as a clean, raw fact list from this data:\n\n{st.session_state.last_df_summary}"""
-                    extracted_metrics = ask_llm(step1_prompt, temperature=0.0)
+                    extracted_metrics = ask_llm(
+                        step1_prompt,
+                        temperature=0.0,
+                        system_prompt=STEP1_SYSTEM_PROMPT
+                    )
 
                     # Step 2: Strategic Reasoning (Creative/Analytical temp 0.4)
-                    step2_prompt = f"""Review these extracted business metrics and construct a final 
-strategic execution plan with action points for the executive team:\n\n{extracted_metrics}"""
+                    step2_prompt = f"""Review the extracted business metrics and provide a concise
+                    strategic analysis for the executive team.
+
+                    Your task is to interpret the observed metrics and identify implications and
+                    actions that are directly grounded in those metrics.
+
+                    STRICT RULES:
+                    - Use only facts, figures, trends, anomalies, and metric definitions explicitly provided in Step 1.
+                    - Do not calculate, derive, average, combine, or transform any new metric.
+                    - Do not introduce new percentages, targets, forecasts, benchmarks, goals, thresholds, or expected improvements.
+                    - Do not label any observed value as a benchmark, target, goal, or threshold unless Step 1 explicitly defines it that way.
+                    - Do not invent assumptions about future performance, costs, demand, or business impact.
+                    - Recommendations must be qualitative and directly connected to observed data.
+                    - Preserve the exact metric names, values, periods, and units from Step 1.
+                    - If the available metrics are insufficient to support a stronger recommendation, explicitly state that limitation.
+                    - Do not add information that is not present in Step 1.
+
+                    EXTRACTED METRICS:
+                    {extracted_metrics}"""
                     final_strategy = ask_llm(step2_prompt, temperature=0.4)
 
                     # Save to session_state so the result survives reruns
